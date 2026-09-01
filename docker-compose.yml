@@ -1,0 +1,47 @@
+services:
+  api:
+    volumes:
+      - ./src/crm_be:/crm_be
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    environment:
+      PYTHONPATH: "/"
+      SEED_PROFILE: ${SEED_PROFILE}
+      COOKIE_SECURE: ${COOKIE_SECURE}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL}
+      DB_CONNECTION: ${DB_CONNECTION}
+      MYSQL_HOST: ${MYSQL_HOST}
+      MYSQL_PORT: ${MYSQL_PORT}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - 8000:8000
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD",
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 10
+    ports:
+      - 3306:3306

@@ -1,0 +1,76 @@
+[project]
+name = "crm-be"
+version = "0.1.0"
+description = ""
+authors = [{ name = "NaraSyuhei", email = "syuhei.nara@novel.jpn.com" }]
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi[all] (>=0.139.0,<0.140.0)",
+    "alembic (>=1.18.5,<2.0.0)",
+    "sqlalchemy (>=2.0.51,<3.0.0)",
+    "mysqlclient (>=2.2.8,<3.0.0)",
+    "bcrypt (>=5.0.0,<6.0.0)",
+    "pyjwt (>=2.13.0,<3.0.0)",
+]
+
+[tool.poetry]
+packages = [{ include = "crm_be", from = "src" }]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.1.1,<10.0.0)",
+    "ruff (>=0.15.20,<0.16.0)",
+    "python-dotenv (>=1.2.2,<2.0.0)",
+    "pytest-cov (>=7.1.0,<8.0.0)",
+    "freezegun (>=1.5.5,<2.0.0)",
+    "httpx2 (>=2.5.0,<3.0.0)",
+]
+
+[tool.ruff]
+lint.extend-select = [
+    "E",       # pycodestyle（PEP8）
+    "F",       # pyflakes（未使用の変数など）
+    "I",       # isort（インポート順）
+    "B",       # flake8-bugbear（バグにつながるコード）
+    "UP",      # pyupgrade（新しい構文の推奨）
+    "C4",      # flake8-comprehensions（内包表記の改善）
+    "ANN",     # flake8-annotations（型アノテーションの有無）
+    "SIM",     # flake8-simplify（冗長な構文の簡略化）
+    "FAST002",
+    "FAST003", # fast-api-unused-path-parameter（FastAPIにおいてpath parameterのシグネチャ宣言を強制）
+]
+
+lint.ignore = [
+    "E501", # 行が長すぎる
+    "B008",
+]
+
+line-length = 100        # 行の最大長
+target-version = "py312" # 対象Pythonバージョン
+show-fixes = true        # VSCode上でfixできる項目を表示
+
+[tool.ruff.lint.isort]
+known-first-party = ["crm_be"] # 自作モジュールの名前
+combine-as-imports = true
+force-single-line = false
+lines-between-types = 1
+
+[tool.ruff.lint.flake8-type-checking]
+strict = true # 型チェック目的のインポートはすべて遅延させるように警告
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--cov=crm_be --cov-report=term-missing --cov-report=html:htmlcov"
+
+[tool.coverage.run]
+source = ["src/crm_be"]
+omit = ["src/crm_be/alembic/*", "src/crm_be/scripts/*"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]

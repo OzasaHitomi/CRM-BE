@@ -1,0 +1,9 @@
+.env
+.env.test.unit
+.env.test.e2e
+__pycache__/
+.venv/
+
+# Coverage reports
+.coverage
+htmlcov/
