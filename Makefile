@@ -1,3 +1,7 @@
+# eval $(poetry env activate) でシェルに入る　（deactivate で抜ける）
+# or
+# poetry run を使う（アクティベート不要）
+
 .PHONY: lint lint-fix format format-fix fix check-all test-up test-down e2e-up e2e-down test cov migrate-create migrate-up migrate-down
 
 lint:

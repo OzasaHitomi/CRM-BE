@@ -51,6 +51,22 @@ class GetCustomersResponseItem(BaseV1ResponseSchema):
     assigned_user: AssignedUserResponseItem | None
 
 
+# 顧客一覧をページ単位で返すときに、あわせて返すページ情報
+# FE側はこの情報を使って「次へ/前へ」ボタンやページ番号の活性・非活性を判断する
+class PaginationResponseItem(BaseV1ResponseSchema):
+    page: int  # 現在何ページ目か（1始まり）
+    page_size: int  # 1ページに含まれる件数
+    total_count: int  # 絞り込み後の顧客の総件数（ページ分割前の全件数）
+    total_pages: int  # 総ページ数（= total_countをpage_sizeで割って切り上げた値）
+
+
+# 顧客一覧APIのレスポンス全体
+# 一覧データ（customers）とページ情報（pagination）をまとめて返す
+class GetCustomersResponse(BaseV1ResponseSchema):
+    customers: list[GetCustomersResponseItem]
+    pagination: PaginationResponseItem
+
+
 class GetCustomerResponse(BaseV1ResponseSchema):
     customer_id: uuid.UUID
     company_name: str

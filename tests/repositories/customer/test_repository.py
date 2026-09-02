@@ -111,16 +111,17 @@ class TestGetCustomers:
         )
         unassigned_customer = create_customer(db_session, build_customer(assigned_user_id=None))
 
-        result = get_customers(db_session)
+        result, total_count = get_customers(db_session)
 
         ids = {customer.id for customer in result}
         assert ids == {own_customer.id, other_customer.id, unassigned_customer.id}
+        assert total_count == 3
 
     def test_includes_customers_assigned_to_given_user(self, db_session: Session) -> None:
         sales_user = create_user(db_session)
         own_customer = create_customer(db_session, build_customer(assigned_user_id=sales_user.id))
 
-        result = get_customers(db_session, visible_to_user_id=sales_user.id)
+        result, _ = get_customers(db_session, visible_to_user_id=sales_user.id)
 
         assert own_customer.id in {customer.id for customer in result}
 
@@ -128,7 +129,7 @@ class TestGetCustomers:
         sales_user = create_user(db_session)
         unassigned_customer = create_customer(db_session, build_customer(assigned_user_id=None))
 
-        result = get_customers(db_session, visible_to_user_id=sales_user.id)
+        result, _ = get_customers(db_session, visible_to_user_id=sales_user.id)
 
         assert unassigned_customer.id in {customer.id for customer in result}
 
@@ -139,7 +140,7 @@ class TestGetCustomers:
             db_session, build_customer(assigned_user_id=other_sales_user.id)
         )
 
-        result = get_customers(db_session, visible_to_user_id=sales_user.id)
+        result, _ = get_customers(db_session, visible_to_user_id=sales_user.id)
 
         assert other_customer.id not in {customer.id for customer in result}
 
@@ -150,23 +151,58 @@ class TestGetCustomers:
         )
         newer_customer = create_customer(db_session, build_customer(created_at=now))
 
-        result = get_customers(db_session)
+        result, _ = get_customers(db_session)
 
         assert [customer.id for customer in result] == [newer_customer.id, older_customer.id]
 
     def test_returns_empty_list_when_no_customers(self, db_session: Session) -> None:
-        result = get_customers(db_session)
+        result, total_count = get_customers(db_session)
 
         assert result == []
+        assert total_count == 0
 
     def test_loads_assigned_user(self, db_session: Session) -> None:
         sales_user = create_user(db_session)
         create_customer(db_session, build_customer(assigned_user_id=sales_user.id))
 
-        result = get_customers(db_session)
+        result, _ = get_customers(db_session)
 
         assert result[0].assigned_user is not None
         assert result[0].assigned_user.id == sales_user.id
+
+    def test_limits_results_to_page_size(self, db_session: Session) -> None:
+        # 顧客を15件作成する（1ページあたりの件数10件を超える数）
+        for _ in range(15):
+            create_customer(db_session, build_customer())
+
+        # page=1（1ページ目）を指定して取得する
+        result, total_count = get_customers(db_session, page=1)
+
+        # 1ページ目にはページサイズ分の10件しか含まれないこと
+        assert len(result) == 10
+        # 一方、全体の件数（total_count）は絞り込まれず15件のままであること
+        assert total_count == 15
+
+    def test_returns_remaining_items_on_second_page(self, db_session: Session) -> None:
+        now = datetime.now(UTC)
+        # created_atをずらしながら15件作成する。i分前で作成しているため、
+        # customers[0]が最新、customers[14]が最も古い顧客になる
+        # （get_customersはcreated_atの降順で返す仕様のため、この並び順が結果の並び順と対応する）
+        customers = [
+            create_customer(db_session, build_customer(created_at=now - timedelta(minutes=i)))
+            for i in range(15)
+        ]
+
+        # page=2（2ページ目）を指定して取得する
+        result, total_count = get_customers(db_session, page=2)
+
+        # 全体件数は15件のまま
+        assert total_count == 15
+        # 2ページ目には、1ページ目（新しい順に10件）に入りきらなかった
+        # 残り5件（11件目〜15件目＝customers[10:15]）が、同じ並び順で返ること
+        assert [customer.id for customer in result] == [
+            customer.id for customer in customers[10:15]
+        ]
 
 
 class TestGetCustomerById:
