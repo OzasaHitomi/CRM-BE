@@ -308,7 +308,7 @@ class TestGetCustomers:
         response = client.get("/api/v1/customers")
 
         assert response.status_code == 200
-        ids = {item["customerId"] for item in response.json()}
+        ids = {item["customerId"] for item in response.json()["customers"]}
         assert own_customer.id in ids
 
     def test_sales_sees_unassigned_customer(self, client: TestClient, db_session: Session) -> None:
@@ -323,7 +323,7 @@ class TestGetCustomers:
         response = client.get("/api/v1/customers")
 
         assert response.status_code == 200
-        ids = {item["customerId"] for item in response.json()}
+        ids = {item["customerId"] for item in response.json()["customers"]}
         assert unassigned_customer.id in ids
 
     def test_sales_does_not_see_other_users_customer(
@@ -341,7 +341,7 @@ class TestGetCustomers:
         response = client.get("/api/v1/customers")
 
         assert response.status_code == 200
-        ids = {item["customerId"] for item in response.json()}
+        ids = {item["customerId"] for item in response.json()["customers"]}
         assert other_customer.id not in ids
 
     def test_manager_sees_all_customers(self, client: TestClient, db_session: Session) -> None:
@@ -358,7 +358,7 @@ class TestGetCustomers:
         response = client.get("/api/v1/customers")
 
         assert response.status_code == 200
-        ids = {item["customerId"] for item in response.json()}
+        ids = {item["customerId"] for item in response.json()["customers"]}
         assert assigned_customer.id in ids
         assert unassigned_customer.id in ids
 
@@ -373,7 +373,7 @@ class TestGetCustomers:
         response = client.get("/api/v1/customers")
 
         assert response.status_code == 200
-        ids = {item["customerId"] for item in response.json()}
+        ids = {item["customerId"] for item in response.json()["customers"]}
         assert assigned_customer.id in ids
         assert unassigned_customer.id in ids
 
@@ -389,7 +389,7 @@ class TestGetCustomers:
 
         response = client.get("/api/v1/customers")
 
-        item = next(i for i in response.json() if i["customerId"] == customer.id)
+        item = next(i for i in response.json()["customers"] if i["customerId"] == customer.id)
         assert item["companyName"] == "山田商事"
         assert item["industry"] == "finance"
 
@@ -404,7 +404,7 @@ class TestGetCustomers:
 
         response = client.get("/api/v1/customers")
 
-        item = next(i for i in response.json() if i["customerId"] == customer.id)
+        item = next(i for i in response.json()["customers"] if i["customerId"] == customer.id)
         assert item["assignedUser"] == {"userId": sales_user.id, "name": sales_user.name}
 
     def test_assigned_user_is_null_when_unassigned(
@@ -417,7 +417,7 @@ class TestGetCustomers:
 
         response = client.get("/api/v1/customers")
 
-        item = next(i for i in response.json() if i["customerId"] == customer.id)
+        item = next(i for i in response.json()["customers"] if i["customerId"] == customer.id)
         assert item["assignedUser"] is None
 
     def test_fails_when_not_logged_in(self, client: TestClient) -> None:
@@ -435,7 +435,152 @@ class TestGetCustomers:
         response = client.get("/api/v1/customers")
 
         assert response.status_code == 200
-        assert response.json() == []
+        body = response.json()
+        assert body["customers"] == []
+        # 顧客が0件のときも、ページネーション情報（現在ページ・1ページの件数・
+        # 全件数・総ページ数）が正しい初期値で返ってくることを確認する
+        assert body["pagination"] == {
+            "page": 1,
+            "pageSize": 10,
+            "totalCount": 0,
+            "totalPages": 0,
+        }
+
+    def test_defaults_to_first_page_with_ten_items(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        # ページ指定なしでアクセスした場合、デフォルトで1ページ目・
+        # 1ページあたり10件が返ることを確認するテスト
+        create_and_login_as(
+            client,
+            db_session,
+            email="admin_get_default_page@example.com",
+            account_type=AccountType.admin,
+        )
+        for _ in range(11):
+            make_customer(db_session)
+
+        response = client.get("/api/v1/customers")
+
+        body = response.json()
+        # 11件の顧客を作成しても、1ページ目には10件までしか含まれない
+        assert len(body["customers"]) == 10
+        # 全件数は11件、ページサイズ10件なら総ページ数は2ページになる
+        assert body["pagination"] == {
+            "page": 1,
+            "pageSize": 10,
+            "totalCount": 11,
+            "totalPages": 2,
+        }
+
+    def test_returns_remaining_items_on_second_page(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        # 2ページ目をクエリパラメータで指定した場合、
+        # 1ページ目に入りきらなかった残りの顧客が返ることを確認するテスト
+        create_and_login_as(
+            client,
+            db_session,
+            email="admin_get_second_page@example.com",
+            account_type=AccountType.admin,
+        )
+        for _ in range(11):
+            make_customer(db_session)
+
+        response = client.get("/api/v1/customers", params={"page": 2})
+
+        body = response.json()
+        # 11件中10件は1ページ目に入るため、2ページ目には残り1件だけが返る
+        assert len(body["customers"]) == 1
+        assert body["pagination"]["page"] == 2
+
+    def test_different_pages_return_different_customers(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        # 1ページ目と2ページ目で取得できる顧客が重複していないことを確認するテスト
+        create_and_login_as(
+            client,
+            db_session,
+            email="admin_get_page_distinct@example.com",
+            account_type=AccountType.admin,
+        )
+        for _ in range(11):
+            make_customer(db_session)
+
+        first_page = client.get("/api/v1/customers", params={"page": 1}).json()
+        second_page = client.get("/api/v1/customers", params={"page": 2}).json()
+
+        first_page_ids = {item["customerId"] for item in first_page["customers"]}
+        second_page_ids = {item["customerId"] for item in second_page["customers"]}
+        # isdisjoint()は2つの集合に共通する要素が1つもないことを確認するメソッド
+        assert first_page_ids.isdisjoint(second_page_ids)
+
+    def test_rejects_page_below_one(self, client: TestClient, db_session: Session) -> None:
+        # pageに0のような不正な値（1未満）を指定した場合、
+        # バリデーションエラー（422）になることを確認するテスト
+        create_and_login_as(
+            client,
+            db_session,
+            email="admin_get_invalid_page@example.com",
+            account_type=AccountType.admin,
+        )
+
+        response = client.get("/api/v1/customers", params={"page": 0})
+
+        assert response.status_code == 422
+
+    def test_applies_custom_page_size(self, client: TestClient, db_session: Session) -> None:
+        # pageSizeをクエリパラメータで指定した場合、その件数に絞り込まれ、
+        # レスポンスのpagination.pageSizeにも反映されることを確認するテスト
+        create_and_login_as(
+            client,
+            db_session,
+            email="admin_get_custom_page_size@example.com",
+            account_type=AccountType.admin,
+        )
+        for _ in range(5):
+            make_customer(db_session)
+
+        response = client.get("/api/v1/customers", params={"pageSize": 3})
+
+        body = response.json()
+        assert len(body["customers"]) == 3
+        assert body["pagination"] == {
+            "page": 1,
+            "pageSize": 3,
+            "totalCount": 5,
+            "totalPages": 2,
+        }
+
+    def test_rejects_page_size_below_one(self, client: TestClient, db_session: Session) -> None:
+        # pageSizeに0のような不正な値（1未満）を指定した場合、
+        # バリデーションエラー（422）になることを確認するテスト
+        create_and_login_as(
+            client,
+            db_session,
+            email="admin_get_invalid_page_size_low@example.com",
+            account_type=AccountType.admin,
+        )
+
+        response = client.get("/api/v1/customers", params={"pageSize": 0})
+
+        assert response.status_code == 422
+
+    def test_rejects_page_size_above_upper_limit(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        # pageSizeの上限（100）を超える値を指定した場合、
+        # バリデーションエラー（422）になることを確認するテスト
+        create_and_login_as(
+            client,
+            db_session,
+            email="admin_get_invalid_page_size_high@example.com",
+            account_type=AccountType.admin,
+        )
+
+        response = client.get("/api/v1/customers", params={"pageSize": 101})
+
+        assert response.status_code == 422
 
 
 class TestGetCustomer:

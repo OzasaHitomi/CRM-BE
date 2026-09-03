@@ -1,4 +1,4 @@
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from crm_be.models.customer import Customer
@@ -17,17 +17,49 @@ def create_customer(session: Session, customer: Customer) -> Customer:
     return customer
 
 
-def get_customers(session: Session, visible_to_user_id: str | None = None) -> list[Customer]:
-    stmt = select(Customer).options(joinedload(Customer.assigned_user))
+def get_customers(
+    session: Session,
+    visible_to_user_id: str | None = None,
+    *,
+    page: int = 1,
+    page_size: int = 10,
+) -> tuple[list[Customer], int]:
+    # page/page_sizeはAPI側で既に妥当な範囲に絞り込まれている想定だが、
+    # デバッグ時に不正値の混入へ気付けるようここでも明示的に弾く。
+    if page < 1:
+        raise ValueError(f"page must be 1 or greater, but got {page}")
+    if page_size < 1:
+        raise ValueError(f"page_size must be 1 or greater, but got {page_size}")
+
+    # 「絞り込み条件（visible_to_user_id）」だけを持つベースのクエリを先に作る。
+    # ここにLIMIT/OFFSETを付けず、件数カウントと実データ取得の両方で使い回す。
+    base_stmt = select(Customer)
     if visible_to_user_id is not None:
-        stmt = stmt.where(
+        base_stmt = base_stmt.where(
             or_(
                 Customer.assigned_user_id == visible_to_user_id,
                 Customer.assigned_user_id.is_(None),
             )
         )
-    stmt = stmt.order_by(Customer.created_at.desc())
-    return list(session.scalars(stmt))
+
+    # ページ分割する前の「絞り込み後の全件数」を取得する。
+    # FEが総ページ数を計算したり、「◯件中△件」のような表示をするために必要。
+    total_count = session.scalar(select(func.count()).select_from(base_stmt.subquery())) or 0
+
+    # 実際にそのページ分だけデータを取得するクエリ。
+    # limit: 1ページあたりの件数、offset: 先頭から何件飛ばすか。
+    # 例）page=2 のとき offset=10 → 11件目から10件を取得する。
+    # created_at だけだと同時刻レコードの順序がページ間で不定になり、
+    # 同じ顧客が複数ページに出たり抜け落ちたりするため、id順序をタイブレークに追加する。
+    stmt = (
+        base_stmt.options(joinedload(Customer.assigned_user))
+        .order_by(Customer.created_at.desc(), Customer.id.desc())
+        .limit(page_size)
+        .offset((page - 1) * page_size)
+    )
+    customers = list(session.scalars(stmt))
+
+    return customers, total_count
 
 
 def get_customer_by_id(
