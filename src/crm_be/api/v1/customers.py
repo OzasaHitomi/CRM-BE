@@ -14,7 +14,6 @@ from crm_be.models.customer import Customer
 from crm_be.models.deal import Deal
 from crm_be.models.user import User
 from crm_be.repositories.customer.repository import (
-    PAGE_SIZE,
     assign_customer_user as assign_customer_user_in_db,
     create_customer as create_customer_in_db,
     get_customer_by_id,
@@ -47,15 +46,19 @@ router = APIRouter()
 def get_customers(
     session: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-    # FEからのクエリパラメータ（例: /customers?page=2）を受け取る。
+    # FEからのクエリパラメータ（例: /customers?page=2&pageSize=20）を受け取る。
     # ge=1: 1未満の値が来たら422エラーにする（0ページ目やマイナスページを弾く）
     page: Annotated[int, Query(ge=1)] = 1,
+    # le=100: 過大なpage_sizeを指定されてパフォーマンスが悪化しないよう上限を設ける
+    # alias: レスポンス（pageSize等）とキー名の表記を揃えるためキャメルケースにする
+    page_size: Annotated[int, Query(alias="pageSize", ge=1, le=100)] = 10,
 ) -> GetCustomersResponse:
     visible_to_user_id = current_user.id if current_user.account_type == AccountType.sales else None
 
     # 該当ページの顧客一覧と、絞り込み後の総件数の両方をリポジトリから受け取る
-    # 1ページあたりの件数（PAGE_SIZE）はrepository.py側で固定値として扱われる
-    customers, total_count = get_customers_in_db(session, visible_to_user_id, page=page)
+    customers, total_count = get_customers_in_db(
+        session, visible_to_user_id, page=page, page_size=page_size
+    )
 
     response_items = []
     for customer in customers:
@@ -78,16 +81,16 @@ def get_customers(
 
     # 総ページ数を計算する。
     # //は「割り算の結果を切り捨てて整数にする」演算子（例: 11 // 10 = 1）。
-    # ただの total_count // PAGE_SIZE だと余りが切り捨てられてページが1つ足りなくなるため、
-    # 先に (PAGE_SIZE - 1) を足すことで「1件でも余りがあれば1ページ繰り上げる」効果を出している。
-    # 例）total_count=11 のとき (11+10-1)//10 = 20//10 = 2ページ
-    total_pages = (total_count + PAGE_SIZE - 1) // PAGE_SIZE
+    # ただの total_count // page_size だと余りが切り捨てられてページが1つ足りなくなるため、
+    # 先に (page_size - 1) を足すことで「1件でも余りがあれば1ページ繰り上げる」効果を出している。
+    # 例）total_count=11, page_size=10 のとき (11+10-1)//10 = 20//10 = 2ページ
+    total_pages = (total_count + page_size - 1) // page_size
 
     return GetCustomersResponse(
         customers=response_items,
         pagination=PaginationResponseItem(
             page=page,
-            page_size=PAGE_SIZE,
+            page_size=page_size,
             total_count=total_count,
             total_pages=total_pages,
         ),

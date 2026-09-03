@@ -5,9 +5,6 @@ from crm_be.models.customer import Customer
 from crm_be.models.deal import Deal
 from crm_be.store.enums.industry_type import IndustryType
 
-# 顧客一覧の1ページあたりの件数。可変にする要件がないため固定値としている。
-PAGE_SIZE = 10
-
 
 def create_customer(session: Session, customer: Customer) -> Customer:
     session.add(customer)
@@ -25,7 +22,15 @@ def get_customers(
     visible_to_user_id: str | None = None,
     *,
     page: int = 1,
+    page_size: int = 10,
 ) -> tuple[list[Customer], int]:
+    # page/page_sizeはAPI側で既に妥当な範囲に絞り込まれている想定だが、
+    # デバッグ時に不正値の混入へ気付けるようここでも明示的に弾く。
+    if page < 1:
+        raise ValueError(f"page must be 1 or greater, but got {page}")
+    if page_size < 1:
+        raise ValueError(f"page_size must be 1 or greater, but got {page_size}")
+
     # 「絞り込み条件（visible_to_user_id）」だけを持つベースのクエリを先に作る。
     # ここにLIMIT/OFFSETを付けず、件数カウントと実データ取得の両方で使い回す。
     base_stmt = select(Customer)
@@ -44,11 +49,13 @@ def get_customers(
     # 実際にそのページ分だけデータを取得するクエリ。
     # limit: 1ページあたりの件数、offset: 先頭から何件飛ばすか。
     # 例）page=2 のとき offset=10 → 11件目から10件を取得する。
+    # created_at だけだと同時刻レコードの順序がページ間で不定になり、
+    # 同じ顧客が複数ページに出たり抜け落ちたりするため、id順序をタイブレークに追加する。
     stmt = (
         base_stmt.options(joinedload(Customer.assigned_user))
-        .order_by(Customer.created_at.desc())
-        .limit(PAGE_SIZE)
-        .offset((page - 1) * PAGE_SIZE)
+        .order_by(Customer.created_at.desc(), Customer.id.desc())
+        .limit(page_size)
+        .offset((page - 1) * page_size)
     )
     customers = list(session.scalars(stmt))
 

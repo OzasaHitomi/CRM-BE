@@ -23,6 +23,10 @@ from crm_be.store.enums.industry_type import IndustryType
 from tests.conftest import RollbackTracker
 from tests.factories.user import create_user
 
+# get_customersのpage_sizeはAPI層のクエリパラメータとして決定される値のため、
+# repository自体はどんな値でも受け付ける。テストでは任意の固定値として扱う。
+PAGE_SIZE = 10
+
 
 def build_customer(**override: object) -> Customer:
     defaults: dict[str, object] = {
@@ -111,7 +115,7 @@ class TestGetCustomers:
         )
         unassigned_customer = create_customer(db_session, build_customer(assigned_user_id=None))
 
-        result, total_count = get_customers(db_session)
+        result, total_count = get_customers(db_session, page_size=PAGE_SIZE)
 
         ids = {customer.id for customer in result}
         assert ids == {own_customer.id, other_customer.id, unassigned_customer.id}
@@ -121,7 +125,7 @@ class TestGetCustomers:
         sales_user = create_user(db_session)
         own_customer = create_customer(db_session, build_customer(assigned_user_id=sales_user.id))
 
-        result, _ = get_customers(db_session, visible_to_user_id=sales_user.id)
+        result, _ = get_customers(db_session, visible_to_user_id=sales_user.id, page_size=PAGE_SIZE)
 
         assert own_customer.id in {customer.id for customer in result}
 
@@ -129,7 +133,7 @@ class TestGetCustomers:
         sales_user = create_user(db_session)
         unassigned_customer = create_customer(db_session, build_customer(assigned_user_id=None))
 
-        result, _ = get_customers(db_session, visible_to_user_id=sales_user.id)
+        result, _ = get_customers(db_session, visible_to_user_id=sales_user.id, page_size=PAGE_SIZE)
 
         assert unassigned_customer.id in {customer.id for customer in result}
 
@@ -140,7 +144,7 @@ class TestGetCustomers:
             db_session, build_customer(assigned_user_id=other_sales_user.id)
         )
 
-        result, _ = get_customers(db_session, visible_to_user_id=sales_user.id)
+        result, _ = get_customers(db_session, visible_to_user_id=sales_user.id, page_size=PAGE_SIZE)
 
         assert other_customer.id not in {customer.id for customer in result}
 
@@ -151,12 +155,47 @@ class TestGetCustomers:
         )
         newer_customer = create_customer(db_session, build_customer(created_at=now))
 
-        result, _ = get_customers(db_session)
+        result, _ = get_customers(db_session, page_size=PAGE_SIZE)
 
         assert [customer.id for customer in result] == [newer_customer.id, older_customer.id]
 
+    def test_orders_by_id_descending_when_created_at_is_same(self, db_session: Session) -> None:
+        # created_atが同一の顧客を複数作成する。
+        # created_atだけでは順序が不定になるため、idの降順がタイブレークとして
+        # 使われることを確認する。
+        now = datetime.now(UTC)
+        customers = sorted(
+            (create_customer(db_session, build_customer(created_at=now)) for _ in range(3)),
+            key=lambda customer: customer.id,
+            reverse=True,
+        )
+
+        result, _ = get_customers(db_session, page_size=PAGE_SIZE)
+
+        assert [customer.id for customer in result] == [customer.id for customer in customers]
+
+    def test_raises_value_error_when_page_is_zero(self, db_session: Session) -> None:
+        # page=0はページ番号として不正なため、ValueErrorが送出されることを確認する。
+        with pytest.raises(ValueError, match="page must be 1 or greater"):
+            get_customers(db_session, page=0, page_size=PAGE_SIZE)
+
+    def test_raises_value_error_when_page_is_negative(self, db_session: Session) -> None:
+        # pageに負数を渡した場合も同様にValueErrorが送出されることを確認する。
+        with pytest.raises(ValueError, match="page must be 1 or greater"):
+            get_customers(db_session, page=-1, page_size=PAGE_SIZE)
+
+    def test_raises_value_error_when_page_size_is_zero(self, db_session: Session) -> None:
+        # page_size=0は1ページあたりの件数として不正なため、ValueErrorが送出されることを確認する。
+        with pytest.raises(ValueError, match="page_size must be 1 or greater"):
+            get_customers(db_session, page_size=0)
+
+    def test_raises_value_error_when_page_size_is_negative(self, db_session: Session) -> None:
+        # page_sizeに負数を渡した場合も同様にValueErrorが送出されることを確認する。
+        with pytest.raises(ValueError, match="page_size must be 1 or greater"):
+            get_customers(db_session, page_size=-1)
+
     def test_returns_empty_list_when_no_customers(self, db_session: Session) -> None:
-        result, total_count = get_customers(db_session)
+        result, total_count = get_customers(db_session, page_size=PAGE_SIZE)
 
         assert result == []
         assert total_count == 0
@@ -165,7 +204,7 @@ class TestGetCustomers:
         sales_user = create_user(db_session)
         create_customer(db_session, build_customer(assigned_user_id=sales_user.id))
 
-        result, _ = get_customers(db_session)
+        result, _ = get_customers(db_session, page_size=PAGE_SIZE)
 
         assert result[0].assigned_user is not None
         assert result[0].assigned_user.id == sales_user.id
@@ -176,7 +215,7 @@ class TestGetCustomers:
             create_customer(db_session, build_customer())
 
         # page=1（1ページ目）を指定して取得する
-        result, total_count = get_customers(db_session, page=1)
+        result, total_count = get_customers(db_session, page=1, page_size=PAGE_SIZE)
 
         # 1ページ目にはページサイズ分の10件しか含まれないこと
         assert len(result) == 10
@@ -194,7 +233,7 @@ class TestGetCustomers:
         ]
 
         # page=2（2ページ目）を指定して取得する
-        result, total_count = get_customers(db_session, page=2)
+        result, total_count = get_customers(db_session, page=2, page_size=PAGE_SIZE)
 
         # 全体件数は15件のまま
         assert total_count == 15

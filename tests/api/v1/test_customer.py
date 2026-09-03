@@ -529,6 +529,59 @@ class TestGetCustomers:
 
         assert response.status_code == 422
 
+    def test_applies_custom_page_size(self, client: TestClient, db_session: Session) -> None:
+        # pageSizeをクエリパラメータで指定した場合、その件数に絞り込まれ、
+        # レスポンスのpagination.pageSizeにも反映されることを確認するテスト
+        create_and_login_as(
+            client,
+            db_session,
+            email="admin_get_custom_page_size@example.com",
+            account_type=AccountType.admin,
+        )
+        for _ in range(5):
+            make_customer(db_session)
+
+        response = client.get("/api/v1/customers", params={"pageSize": 3})
+
+        body = response.json()
+        assert len(body["customers"]) == 3
+        assert body["pagination"] == {
+            "page": 1,
+            "pageSize": 3,
+            "totalCount": 5,
+            "totalPages": 2,
+        }
+
+    def test_rejects_page_size_below_one(self, client: TestClient, db_session: Session) -> None:
+        # pageSizeに0のような不正な値（1未満）を指定した場合、
+        # バリデーションエラー（422）になることを確認するテスト
+        create_and_login_as(
+            client,
+            db_session,
+            email="admin_get_invalid_page_size_low@example.com",
+            account_type=AccountType.admin,
+        )
+
+        response = client.get("/api/v1/customers", params={"pageSize": 0})
+
+        assert response.status_code == 422
+
+    def test_rejects_page_size_above_upper_limit(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        # pageSizeの上限（100）を超える値を指定した場合、
+        # バリデーションエラー（422）になることを確認するテスト
+        create_and_login_as(
+            client,
+            db_session,
+            email="admin_get_invalid_page_size_high@example.com",
+            account_type=AccountType.admin,
+        )
+
+        response = client.get("/api/v1/customers", params={"pageSize": 101})
+
+        assert response.status_code == 422
+
 
 class TestGetCustomer:
     def test_manager_can_view_unassigned_customer(
