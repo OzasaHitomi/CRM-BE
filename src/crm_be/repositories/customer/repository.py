@@ -21,6 +21,7 @@ def get_customers(
     session: Session,
     visible_to_user_id: str | None = None,
     *,
+    industry: IndustryType | None = None,
     page: int = 1,
     page_size: int = 10,
 ) -> tuple[list[Customer], int]:
@@ -30,8 +31,10 @@ def get_customers(
         raise ValueError(f"page must be 1 or greater, but got {page}")
     if page_size < 1:
         raise ValueError(f"page_size must be 1 or greater, but got {page_size}")
+    if industry is not None and industry not in IndustryType:
+        raise ValueError(f"industry must be a valid IndustryType, but got {industry!r}")
 
-    # 「絞り込み条件（visible_to_user_id）」だけを持つベースのクエリを先に作る。
+    # 「絞り込み条件（visible_to_user_id, industry）」だけを持つベースのクエリを先に作る。
     # ここにLIMIT/OFFSETを付けず、件数カウントと実データ取得の両方で使い回す。
     base_stmt = select(Customer)
     if visible_to_user_id is not None:
@@ -41,6 +44,8 @@ def get_customers(
                 Customer.assigned_user_id.is_(None),
             )
         )
+    if industry is not None:
+        base_stmt = base_stmt.where(Customer.industry == industry)
 
     # ページ分割する前の「絞り込み後の全件数」を取得する。
     # FEが総ページ数を計算したり、「◯件中△件」のような表示をするために必要。
