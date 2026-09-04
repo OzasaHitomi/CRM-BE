@@ -582,6 +582,63 @@ class TestGetCustomers:
 
         assert response.status_code == 422
 
+    def test_filters_by_industry_query_param(self, client: TestClient, db_session: Session) -> None:
+        # industryをクエリパラメータで指定した場合、該当業界の顧客のみが返り、
+        # pagination.totalCountもフィルタ後の件数になることを確認するテスト
+        create_and_login_as(
+            client,
+            db_session,
+            email="admin_get_industry_filter@example.com",
+            account_type=AccountType.admin,
+        )
+        matching_customer = make_customer(db_session, industry=IndustryType.finance)
+        make_customer(db_session, industry=IndustryType.retail)
+
+        response = client.get("/api/v1/customers", params={"industry": "finance"})
+
+        assert response.status_code == 200
+        body = response.json()
+        ids = {item["customerId"] for item in body["customers"]}
+        assert ids == {matching_customer.id}
+        assert body["pagination"]["totalCount"] == 1
+
+    def test_returns_all_industries_when_no_filter(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        # industryを指定しない場合はデフォルトの「全て表示」となり、
+        # 業界を問わず全ての顧客が返ることを確認するテスト
+        create_and_login_as(
+            client,
+            db_session,
+            email="admin_get_no_industry_filter@example.com",
+            account_type=AccountType.admin,
+        )
+        finance_customer = make_customer(db_session, industry=IndustryType.finance)
+        retail_customer = make_customer(db_session, industry=IndustryType.retail)
+
+        response = client.get("/api/v1/customers")
+
+        assert response.status_code == 200
+        ids = {item["customerId"] for item in response.json()["customers"]}
+        assert finance_customer.id in ids
+        assert retail_customer.id in ids
+
+    def test_fails_when_industry_query_param_is_invalid(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        # industryにEnumに存在しない値を指定した場合、
+        # バリデーションエラー（422）になることを確認するテスト
+        create_and_login_as(
+            client,
+            db_session,
+            email="admin_get_invalid_industry@example.com",
+            account_type=AccountType.admin,
+        )
+
+        response = client.get("/api/v1/customers", params={"industry": "invalid"})
+
+        assert response.status_code == 422
+
 
 class TestGetCustomer:
     def test_manager_can_view_unassigned_customer(

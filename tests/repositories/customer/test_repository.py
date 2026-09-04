@@ -148,6 +148,70 @@ class TestGetCustomers:
 
         assert other_customer.id not in {customer.id for customer in result}
 
+    def test_includes_customers_matching_given_industry(self, db_session: Session) -> None:
+        # industryを指定した場合、一致する業界の顧客のみが結果とtotal_countに含まれ、
+        # 他業界の顧客は含まれないことを確認する。
+        matching_customer = create_customer(
+            db_session, build_customer(industry=IndustryType.finance)
+        )
+        create_customer(db_session, build_customer(industry=IndustryType.retail))
+
+        result, total_count = get_customers(
+            db_session, industry=IndustryType.finance, page_size=PAGE_SIZE
+        )
+
+        assert {customer.id for customer in result} == {matching_customer.id}
+        assert total_count == 1
+
+    def test_excludes_customers_of_other_industry(self, db_session: Session) -> None:
+        # industryを指定した場合、異なる業界の顧客は結果とtotal_countから除外されることを確認する。
+        other_industry_customer = create_customer(
+            db_session, build_customer(industry=IndustryType.retail)
+        )
+
+        result, total_count = get_customers(
+            db_session, industry=IndustryType.finance, page_size=PAGE_SIZE
+        )
+
+        assert other_industry_customer.id not in {customer.id for customer in result}
+        assert total_count == 0
+
+    def test_combines_industry_filter_with_visible_to_user_id_and(
+        self, db_session: Session
+    ) -> None:
+        # industryとvisible_to_user_idを同時に指定した場合、両方の条件を満たす顧客のみが
+        # 結果に含まれる（AND条件になる）ことを確認する。
+        sales_user = create_user(db_session)
+        other_sales_user = create_user(db_session)
+        # 自分が担当しているが、業界が異なる顧客(除外されるべき)
+        own_other_industry_customer = create_customer(
+            db_session,
+            build_customer(assigned_user_id=sales_user.id, industry=IndustryType.retail),
+        )
+        # 業界は一致するが、他人が担当している顧客(除外されるべき)
+        other_user_matching_industry_customer = create_customer(
+            db_session,
+            build_customer(assigned_user_id=other_sales_user.id, industry=IndustryType.finance),
+        )
+        # 自分が担当していて、業界も一致する顧客(含まれるべき)
+        matching_customer = create_customer(
+            db_session,
+            build_customer(assigned_user_id=sales_user.id, industry=IndustryType.finance),
+        )
+
+        result, total_count = get_customers(
+            db_session,
+            visible_to_user_id=sales_user.id,
+            industry=IndustryType.finance,
+            page_size=PAGE_SIZE,
+        )
+
+        ids = {customer.id for customer in result}
+        assert ids == {matching_customer.id}
+        assert own_other_industry_customer.id not in ids
+        assert other_user_matching_industry_customer.id not in ids
+        assert total_count == 1
+
     def test_orders_by_created_at_descending(self, db_session: Session) -> None:
         now = datetime.now(UTC)
         older_customer = create_customer(
@@ -193,6 +257,11 @@ class TestGetCustomers:
         # page_sizeに負数を渡した場合も同様にValueErrorが送出されることを確認する。
         with pytest.raises(ValueError, match="page_size must be 1 or greater"):
             get_customers(db_session, page_size=-1)
+
+    def test_raises_value_error_when_industry_is_invalid(self, db_session: Session) -> None:
+        # industryにIndustryTypeに存在しない値を渡した場合、ValueErrorが送出されることを確認する。
+        with pytest.raises(ValueError, match="industry must be a valid IndustryType"):
+            get_customers(db_session, industry="invalid", page_size=PAGE_SIZE)  # type: ignore[arg-type]
 
     def test_returns_empty_list_when_no_customers(self, db_session: Session) -> None:
         result, total_count = get_customers(db_session, page_size=PAGE_SIZE)

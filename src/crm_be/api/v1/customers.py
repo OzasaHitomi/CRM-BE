@@ -38,6 +38,7 @@ from crm_be.schemas.v1.response.customer import (
 )
 from crm_be.store.enums.account_type import AccountType
 from crm_be.store.enums.deal_status import DealStatus
+from crm_be.store.enums.industry_type import IndustryType
 
 router = APIRouter()
 
@@ -46,6 +47,8 @@ router = APIRouter()
 def get_customers(
     session: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    # 業界で絞り込む。未指定時はNoneとなり、リポジトリ層で絞り込みなし(全業界)として扱われる。
+    industry: IndustryType | None = None,
     # FEからのクエリパラメータ（例: /customers?page=2&pageSize=20）を受け取る。
     # ge=1: 1未満の値が来たら422エラーにする（0ページ目やマイナスページを弾く）
     page: Annotated[int, Query(ge=1)] = 1,
@@ -57,7 +60,7 @@ def get_customers(
 
     # 該当ページの顧客一覧と、絞り込み後の総件数の両方をリポジトリから受け取る
     customers, total_count = get_customers_in_db(
-        session, visible_to_user_id, page=page, page_size=page_size
+        session, visible_to_user_id, industry=industry, page=page, page_size=page_size
     )
 
     response_items = []
